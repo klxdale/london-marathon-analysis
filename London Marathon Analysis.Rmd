@@ -1,0 +1,1417 @@
+---
+title: "London Marathon Scrape"
+author: "Kieran Dale"
+date: "2023-06-05"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+# This R script scrapes data from the London Marathon results page, as well as loading data for 8 years of marathon data
+library(tidyverse)
+library(lubridate)
+library(data.table)
+
+
+URL <- "https://results.tcslondonmarathon.com/2023/?page=1&event=MAS&num_results=1000&pid=list&search[sex]=W&search[age_class]=%"
+URL <- "https://results.tcslondonmarathon.com/2023/?page=21&event=MAS&num_results=1000&pid=list&search%5Bsex%5D=W&search%5Bage_class%5D=%25"
+
+
+for (ii in 1:21) {
+  
+    
+    URL <- paste0("https://results.tcslondonmarathon.com/2023/?page=",ii,
+                  "&event=MAS&num_results=1000&pid=list&search%5Bsex%5D=W&search%5Bage_class%5D=%25")
+  
+  
+    library(httr)
+    X <- httr::GET(URL)
+    Y <- data.frame(httr::content(X, as = "parsed",
+                       type = "text/csv")) %>% 
+      rename("text" = 1)
+    
+    
+    Name <- Y %>% slice(seq(231,100000,27)) %>% 
+      rename("COL" = 1) %>% 
+      mutate(COL = str_trim(COL,"right"),
+      # filter(substr(COL,nchar(COL)-5,nchar(COL))=="MAS") %>% 
+             POS = unlist(gregexpr('MAS', COL))[2],
+             STR = substr(COL,POS,nchar(COL)),
+             POS2 = regexpr("h4", STR)) %>% 
+      mutate(Name = substr(STR, 6, POS2-7),
+             Rows = row_number()) %>% 
+      select(Rows,
+             Name)
+    
+    
+    
+    Club <- Y %>% slice(seq(237,100000,27)) %>% 
+      rename("COL" = 1) %>% 
+      mutate(COL = str_trim(COL,"right")) %>% 
+      filter(substr(COL,nchar(COL)-5,nchar(COL))=="</div>") %>% 
+      mutate(N = nchar(COL),
+             Last = N-6,
+             First = unlist(gregexpr('Club', COL))[1] + 10,
+             ClubName = case_when(N == 180 ~ "-",
+                                  TRUE ~ substr(COL, First, Last)),
+             Rows = row_number()) %>% 
+      select(Rows,
+             ClubName)
+    
+    Age <- Y %>% slice(seq(239,100000,27)) %>% 
+      rename("COL" = 1) %>% 
+      mutate(COL = str_trim(COL,"right")) %>% 
+      filter(substr(COL,nchar(COL)-5,nchar(COL))=="</div>") %>% 
+      mutate(N = nchar(COL),
+             Last = N-6,
+             First = unlist(gregexpr('Category', COL))[1] + 14,
+             Age = case_when(N == 180 ~ "-",
+                                  TRUE ~ substr(COL, First, Last)),
+             Rows = row_number()) %>% 
+      select(Rows,
+             Age)
+    
+    
+    Half <- Y %>% slice(seq(241,100000,27)) %>% 
+      rename("COL" = 1) %>% 
+      mutate(COL = str_trim(COL,"right")) %>% 
+      filter(substr(COL,nchar(COL)-5,nchar(COL))=="</div>") %>% 
+      mutate(N = nchar(COL),
+             Last = N-6,
+             First = unlist(gregexpr('Half', COL))[1] + 10,
+             Half = case_when(N == 180 ~ "-",
+                             TRUE ~ substr(COL, First, Last)),
+             Rows = row_number()) %>% 
+      filter(Half!="") %>%
+      mutate(Half = ifelse(nchar(Half)>8,NA,Half)) %>% 
+      select(Rows,
+             Half)
+    
+    
+    Finish <- Y %>% slice(seq(246,100000,27)) %>% 
+      rename("COL" = 1) %>% 
+      mutate(COL = str_trim(COL,"right")) %>% 
+      filter(substr(COL,nchar(COL)-5,nchar(COL))=="</div>") %>% 
+      mutate(N = nchar(COL),
+             Last = N-6,
+             First = unlist(gregexpr('Finish', COL))[1] + 12,
+             Finish = case_when(N == 180 ~ "-",
+                              TRUE ~ substr(COL, First, Last)),
+             Rows = row_number()) %>% 
+      filter(Finish!="") %>%
+      select(Rows,
+             Finish)
+    
+    df1 <- merge(merge(Club,Age,by="Rows"),
+                 merge(Half,Finish,by="Rows"),
+                 by="Rows") %>% 
+      merge(Name, by = "Rows")
+    
+    if (ii == 1) {
+      
+      df_w <- df1
+      
+    } else {
+      
+      df_w <- rbind(df_w, df1)
+      
+    }
+
+}
+
+
+
+
+
+# load old data
+
+file_paths = c("C:/Users/KieranDale/Downloads/TCS London Marathon 2023.txt",
+               paste0("C:/Users/KieranDale/Downloads/TCS London Marathon 2023_",
+                      seq(2,29,1),".txt"))
+
+for (ii in 1:length(file_paths)) {
+  
+    a <- data.frame(readr::read_delim(file_paths[ii], delim = "\n")) %>% 
+      dplyr::rename("text" = 1) %>%
+      filter(!grepl("<",text,ignore.case = T)) %>% 
+      filter(stringr::str_trim(text)!="App")%>% 
+      filter(stringr::str_trim(text)!="tracking App"&
+               stringr::str_trim(text)!="Tracking App"&
+               stringr::str_trim(text)!="tracking app"&
+               stringr::str_trim(text)!="Tracked by"&
+               stringr::str_trim(text)!="Tracked by mika:timing"&
+               stringr::str_trim(text)!="mika:timing tracking App")
+    
+    
+
+    
+    if (ii %in% c(29)) {
+      
+      a <- a %>% 
+        filter(stringr::str_trim(text)!="9271")
+      
+      df1 <- data.frame(
+        names = gsub("Tracked by","",gsub("Tracked by mika:timing","",gsub("Tracked by mika:timing tracking","",gsub("Tracked by mika:timing tracking App","", stringr::str_trim(a$text[substr(a$text,1,7)=="       "]))))),
+        club = stringr::str_trim(a$text[seq(36,7828+18,18)]),
+        age = stringr::str_trim(a$text[seq(36+4,7828+18+4,18)]),
+        half = stringr::str_trim(a$text[seq(36+8,7828+18+8,18)]),
+        finish = stringr::str_trim(a$text[seq(36+10,7828+18+10,18)])
+      )
+      
+    } else {
+      
+    df1 <- data.frame(
+    names = gsub("Tracked by","",gsub("Tracked by mika:timing","",gsub("Tracked by mika:timing tracking","",gsub("Tracked by mika:timing tracking App","", stringr::str_trim(a$text[substr(a$text,1,7)=="       "]))))),
+    club = stringr::str_trim(a$text[seq(36,18032,18)]),
+    age = stringr::str_trim(a$text[seq(36+4,18032+4,18)]),
+    half = stringr::str_trim(a$text[seq(36+8,18032+8,18)]),
+    finish = stringr::str_trim(a$text[seq(36+10,18032+10,18)])
+    
+    )
+    }
+    
+    if (ii == 1) {
+      
+      df_total <- df1
+      
+    } else {
+      
+      df_total <- rbind(df_total,
+                        df1)
+      
+    }
+
+}
+
+#                        
+
+tibble(df_total)
+
+
+
+df_womens <- df_w %>% 
+  select(-Rows) %>% 
+  mutate(gender = "Womens") %>% 
+  rename("club" = 1,
+         "age" = 2,
+         "half" = 3,
+         "finish" = 4,
+         "names" = 5)
+
+df <- df_total %>% 
+  # select(-names) %>% 
+  mutate(gender = "Mens") %>% 
+  rbind(df_womens) %>% 
+  mutate(half = as.ITime(half, format = "%H:%M:%S"),
+         finish = as.ITime(finish, format = "%H:%M:%S"),
+         minutes_half = 60*hour(half) + minute(half) + second(half)/60,
+         minutes_finish = 60*hour(finish) + minute(finish) + second(finish)/60,
+         pace_firsthalf_perkm = minutes_half/(42.2/2),
+         pace_secondhalf_perkm = (minutes_finish - minutes_half)/(42.2/2),
+         pace_full_perkm = minutes_finish/42.2,
+         rank = row_number()) %>% 
+  mutate(age = ifelse(age%in%c("70-74","75-79","80+"),"70+",age))
+
+
+
+```
+
+
+
+```{r}
+
+##########################################################################################################
+# new plots
+data_dir <- "C:/Users/KieranDale/London Marathon/Data/"
+files <- list.files(path = data_dir)
+
+mass <- files[grepl("mass",files)]
+years <- extract_numeric(mass)
+
+# files_list <- lapply(paste0(data_dir, mass), read.csv)
+# mass_results <-  rbindlist(files_list, fill=TRUE)
+for (ii in 1:length(mass)) {
+  
+  data <- read.csv(paste0(data_dir, mass[ii]),stringsAsFactors = F) %>% 
+    janitor::clean_names() %>% 
+    mutate(gender = ifelse(gender=="M","Mens","Womens"),
+           age = category,
+           event = "Mass",
+           half = half_time,
+           finish = finish_time,
+           names = stringr::str_trim(name),
+           year = years[ii]) %>% 
+    select(names, 
+           club, 
+           age,
+           half,
+           finish,
+           gender,
+           year)
+    
+  
+  if (ii == 1) {
+    
+    total <- data
+    
+  } else {
+    
+    total <- rbind(total, data)
+    
+  }
+  
+}
+
+
+
+
+df1423 <- df %>% 
+  select(-rank) %>% 
+  mutate(year = 2023) %>% 
+  rbind(total %>% 
+           mutate(half = as.ITime(half, format = "%H:%M:%S"),
+                  finish = as.ITime(finish, format = "%H:%M:%S"),
+                  minutes_half = 60*hour(half) + minute(half) + second(half)/60,
+                  minutes_finish = 60*hour(finish) + minute(finish) + second(finish)/60,
+                  pace_firsthalf_perkm = minutes_half/(42.2/2),
+                  pace_secondhalf_perkm = (minutes_finish - minutes_half)/(42.2/2),
+                  pace_full_perkm = minutes_finish/42.2) %>% 
+           mutate(age = ifelse(age%in%c("70-74","75-79","80+"),"70+",age))) %>% 
+  ungroup() %>% 
+  group_by(year, gender) %>%
+  arrange(minutes_finish) %>% 
+  mutate(rank = row_number()) %>% 
+  ungroup() %>% 
+  mutate(age = ifelse(age%in%c("70-74","75-79","80+","80-84","85+"),"70+",age))
+
+
+```
+
+
+
+```{r}
+
+
+
+cheat<-df1423 %>% 
+  filter(((pace_secondhalf_perkm<4)&
+            (pace_firsthalf_perkm>5.5))|
+           ((pace_secondhalf_perkm<5)&
+              (pace_firsthalf_perkm>7)))
+
+# average finishing time over the years
+
+ggplot()+
+geom_abline(color = "gray40", lty = 2) +
+geom_jitter(data = df1423 %>% 
+              sample_n(10000) %>% 
+              rbind(cheat),
+            aes(y = pace_firsthalf_perkm,
+                x = pace_secondhalf_perkm,
+                color = as.character(year)),
+            alpha = 0.1)+
+scale_color_manual(values = RColorBrewer::brewer.pal(n=9,"Set1"))+
+theme_bw()+
+labs(y = "Pace per km (first half)",
+     x = "Pace per km (second half)",
+     title = "London Marathon 2023 Pace - By Year")+
+theme(legend.title = element_blank(),
+      axis.text.x = element_text(size = 14),
+      axis.text.y = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      axis.title.x = element_text(size = 14)
+) +
+geom_abline(color = "gray40", lty = 2) +
+ylim(0,12.5)+
+xlim(0,12.5)
+
+
+
+plot_dir <- "C:/Users/KieranDale/London Marathon"
+
+ggsave(paste0(plot_dir,"/Scatter_Year.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 8.5)
+
+
+
+```
+
+
+
+```{r}
+
+ggplot()+
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df1423 %>% 
+                sample_n(100000) %>%
+                filter(year != 2018),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "grey",
+              alpha = 0.1)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=2,"Set2"))+
+  geom_jitter(data = df1423 %>% 
+                sample_n(20000) %>%
+                filter(year == 2018),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = RColorBrewer::brewer.pal(n=2,"Set2")[2],
+              alpha = 0.2)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=2,"Set2"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "London Marathon 2023 Pace - By Year")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,12.5)+
+  xlim(0,12.5)
+
+
+ggsave(paste0(plot_dir,"/Scatter_2018_lessdots.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 8.5)
+
+
+```
+
+
+
+```{r}
+
+
+# average time finishing 
+ggplot()+
+  geom_line(data = df1423 %>% 
+                mutate(min = round(minutes_finish,0)) %>% 
+                group_by(year, min) %>% 
+                summarise(N = n()),
+              aes(y = N,
+                  x = min,
+                  color = as.character(year)),
+              alpha = 0.2)+
+  stat_smooth(data = df1423 %>% 
+              mutate(min = round(minutes_finish,0)) %>% 
+              group_by(year, min) %>% 
+              summarise(N = n()),
+            aes(y = N,
+                x = min,
+                color = as.character(year)),
+            alpha = 0.7,
+            span = 0.35,
+            se = F)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=9,"Set1"))+
+  theme_bw()+
+  labs(y = "N",
+       x = "Minutes to finish marathon",
+       title = "London Marathon - Time to finish (minutes)")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  )
+
+ggsave(paste0(plot_dir,"/Distribution_Finish_Years.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 6)
+
+
+```
+
+
+
+```{r}
+
+
+# average time finishing 
+ggplot()+
+  geom_histogram(data = df1423 %>% filter(year!=2018),
+                 aes(x = minutes_finish,
+                     fill = as.character(year)),
+                 bins = 100,
+                 alpha = 0.2,
+                 position = "identity")+
+  geom_histogram(data = df1423 %>% filter(year==2018),
+                 aes(x = minutes_finish,
+                     fill = as.character(year)),
+                 bins = 100,
+                 alpha = 0.2,
+                 position = "identity",
+                 fill = "orange")+
+  scale_fill_manual(values = rep(c("grey"),8))+
+  theme_bw()+
+  labs(y = "N",
+       x = "Minutes to finish marathon",
+       title = "London Marathon Finishing Times (2014-2023) with 2018 Highlighted")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  )
+
+ggsave(paste0(plot_dir,"/Distribution_Finish_20182.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 6)
+
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_boxplot(data = df1423,
+               aes(x = as.character(year),
+                   y = minutes_finish/60, fill = gender))+
+  facet_wrap(~gender, scales = "free_y")+
+  theme_bw()+
+  labs(y = "Hours to finish marathon",
+       x = "Year",
+       title = "London Marathon 2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))
+
+
+ggsave(paste0(plot_dir,"/Boxplot_Years.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 7)
+
+
+
+```
+
+
+
+```{r}
+
+
+
+meds <- df1423 %>% 
+  mutate(minutes_finish = minutes_finish/60) %>% 
+  group_by(year) %>% 
+  summarise(perc1 = quantile(minutes_finish, 0.1, na.rm = T),
+            perc2 = quantile(minutes_finish, 0.2, na.rm = T),
+            perc3 = quantile(minutes_finish, 0.3, na.rm = T),
+            perc4 = quantile(minutes_finish, 0.4, na.rm = T),
+            median = median(minutes_finish, na.rm = T),
+            perc6 = quantile(minutes_finish, 0.6, na.rm = T),
+            perc7 = quantile(minutes_finish, 0.7, na.rm = T),
+            perc8 = quantile(minutes_finish, 0.8, na.rm = T),
+            perc9 = quantile(minutes_finish, 0.9, na.rm = T),
+            )
+
+
+ggplot()+
+  geom_ribbon(data = meds,
+               aes(x = year,
+                   ymin = perc1,
+                   ymax = perc9),
+              fill = RColorBrewer::brewer.pal(n=8,"Pastel1")[2],
+              alpha = 0.3)+
+  geom_ribbon(data = meds,
+              aes(x = year,
+                  ymin = perc2,
+                  ymax = perc8),
+              fill = RColorBrewer::brewer.pal(n=8,"Pastel1")[2],
+              alpha = 0.4)+
+  geom_ribbon(data = meds,
+              aes(x = year,
+                  ymin = perc3,
+                  ymax = perc7),
+              fill = RColorBrewer::brewer.pal(n=8,"Pastel1")[2],
+              alpha = 0.5)+
+  geom_ribbon(data = meds,
+              aes(x = year,
+                  ymin = perc4,
+                  ymax = perc6),
+              fill = RColorBrewer::brewer.pal(n=8,"Pastel1")[2],
+              alpha = 0.6)+
+  geom_line(data = meds,
+              aes(x = year,
+                  y = median),
+              color = "blue4",
+            size = 1.5,
+            alpha = 1)+
+  theme_bw()+
+  labs(y = "Hours to finish marathon",
+       x = "Year",
+       title = "Median finishing times (shaded areas represent deciles)")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))
+
+
+ggsave(paste0(plot_dir,"/Ribbon_Percentage.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 6)
+
+
+```
+
+
+
+```{r}
+
+
+meds <- df1423 %>%
+  group_by(year) %>%
+  summarise(median = median(minutes_finish/60,na.rm=T))
+
+shift <- 0.4
+meds2 <- meds %>% 
+  mutate(year = year-shift,
+         yearlab = year + shift) %>% 
+  rbind(meds %>% 
+          mutate(year = year + shift,
+          yearlab = year - shift))
+
+cols <- RColorBrewer::brewer.pal(n=9,"Pastel1")
+
+
+ggplot()+
+  geom_jitter(data = df1423 %>%
+                sample_n(100000) %>%
+                group_by(year, 
+                         gender) %>%
+                arrange(finish) %>% 
+                mutate(rank = row_number()),
+              aes(y = minutes_finish/60,
+                  x = year,
+                  color = as.character(year)),
+              size = 0.5,
+              alpha = 0.7)+
+  geom_jitter(data = df1423 %>%
+                group_by(year, 
+                         gender) %>%
+                arrange(finish) %>% 
+                mutate(rank = row_number()) %>% 
+                filter(rank>27000),
+              aes(y = minutes_finish/60,
+                  x = year,
+                  color = as.character(year)),
+              size = 0.5,
+              alpha = 0.7)+
+  geom_jitter(data = df1423 %>%
+                group_by(year, 
+                         gender) %>%
+                arrange(finish) %>% 
+                mutate(rank = row_number()) %>% 
+                filter(rank<1000),
+              aes(y = minutes_finish/60,
+                  x = year,
+                  color = as.character(year)),
+              size = 0.5,
+              alpha = 0.7)+
+  geom_line(data = meds2,
+              aes(y = median,
+                  x = year,
+                  group = yearlab),
+              size = 0.5,
+              alpha = 0.5)+
+  geom_text(data = meds,
+            aes(y = median+0.2,
+                x = year,
+                label = paste0(floor(median),"h",round((median-floor(median))*60,0),"m")),
+            size = 4,
+            alpha = 0.5)+
+  scale_color_manual(values = c(
+    "thistle1","#B3CDE3", "#CCEBC5", "#DECBE4", "#FED9A6", "#FFFFCC", "#E5D8BD", "#FDDAEC","#FBB4AE"
+  ))+
+  theme_bw()+
+  labs(y = "Hours to finish marathon",
+       x = "Year",
+       title = "London Marathon Finishing Times - 2014-2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        legend.position = "none"
+  )+
+  # ylim(0,10)+
+  scale_y_continuous(limits=c(0,10),breaks=seq(0,10,2))+
+  scale_x_continuous(breaks=seq(2014,2023,1))+
+  geom_hline(yintercept = 0, linetype = "solid", size = 0.35, color = "#AAAAAA")
+
+ggsave(paste0(plot_dir,"/Results_Year_Bars.png"),
+       plot = last_plot(),
+       width = 11,
+       height = 7)
+
+
+
+```
+
+
+
+```{r}
+
+
+
+
+
+timedata <- 
+  df1423 %>%
+  group_by(year) %>%
+  summarise(N = n()) %>% ungroup() %>% 
+  mutate(year = as.numeric(year),
+         N = as.numeric(N)) %>%
+  rbind(data.frame(year = 2020,
+                   N = (42561+35889)/2)) %>% 
+  mutate(type = ifelse(year==2020,"dotted","solid"))
+
+
+so_formatter <- function(x) {
+  dplyr::case_when(
+    x < 1e3 ~ as.character(x),
+    x < 1e6 ~ paste0(as.character(x/1e3), "K"),
+    x < 1e9 ~ paste0(as.character(x/1e6), "M"),
+    TRUE ~ "To be implemented..."
+  )
+}
+
+
+ggplot()+
+  geom_line(data = timedata%>% filter(year>=2021),
+              aes(y = N,
+                  x = year),
+              linetype = "solid",
+              size = 1.25,
+              color = "#FBB4AE",
+              alpha = 0.7)+
+  geom_line(data = timedata %>% filter(year<=2019),
+            aes(y = N,
+                x = year),
+            linetype = "solid",
+            size = 1.25,
+            color = "#FBB4AE",
+            alpha = 0.7)+
+  geom_line(data = timedata %>% filter(year%in%c(2019,2020,2021)),
+            aes(y = N,
+                x = year),
+            linetype = "dashed",
+            size = 1.25,
+            color = "#CCCCCC",
+            alpha = 0.5)+
+  scale_color_manual(values = c(
+    "thistle1","#B3CDE3", "#CCEBC5", "#DECBE4", "#FED9A6", "#FFFFCC", "#E5D8BD", "#FDDAEC","#FBB4AE"
+  ))+
+  theme_bw()+
+  labs(y = "Finishers",
+       x = "Year",
+       title = "London Marathon Mass Event Participants - 2014-2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        legend.position = "none"
+  )+
+  # ylim(0,10)+
+  scale_y_continuous(label = so_formatter)+
+  scale_x_continuous(breaks=seq(2014,2023,1))+
+  geom_hline(yintercept = 0, linetype = "solid", size = 0.35, color = "#AAAAAA")
+
+ggsave(paste0(plot_dir,"/Results_Participants.png"),
+       plot = last_plot(),
+       width = 7,
+       height = 4.5)
+
+
+```
+
+
+
+```{r}
+
+
+
+#########################################################################
+# 2023 results #
+
+plot_dir <- "C:/Users/KieranDale/London Marathon"
+
+
+#plot
+
+ggplot()+
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df,
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm,
+                  color = age),
+              alpha = 0.1)+
+  
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Set1"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "London Marathon 2023 Pace - By Age")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,12.5)+
+  xlim(0,12.5)
+
+
+
+
+ggsave(paste0(plot_dir,"/Scatter_Age.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 8.5)
+
+
+```
+
+
+
+```{r}
+
+
+ggplot()+
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df,
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm,
+                  color = gender),
+              alpha = 0.2)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "London Marathon 2023 Pace - By Gender")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        legend.text = element_text(size = 13)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,12.5)+
+  xlim(0,12.5)+ guides(colour = guide_legend(override.aes = list(size=5,
+                                                                 alpha=0.7),
+                                             reverse = T))
+
+
+ggsave(paste0(plot_dir,"/Scatter_Gender2.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 8)
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df %>% rowwise() %>% 
+                mutate(percentage_difference = pace_secondhalf_perkm/pace_firsthalf_perkm) %>% 
+                arrange(percentage_difference) %>% 
+                mutate(
+                       outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")) %>% 
+                filter(outlier=="Standard"),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "grey",
+              alpha = 0.3)+
+  geom_jitter(data = df %>% rowwise() %>% 
+                mutate(percentage_difference = pace_secondhalf_perkm/pace_firsthalf_perkm) %>% 
+                arrange(percentage_difference) %>% 
+                mutate(
+                  outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")) %>% 
+                filter(outlier!="Standard"),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "blue",
+              alpha = 1)+
+  # ggalt::geom_encircle(data = df %>% rowwise() %>% 
+  #               mutate(percentage_difference = pace_secondhalf_perkm/pace_firsthalf_perkm) %>% 
+  #               arrange(percentage_difference) %>% 
+  #               mutate(
+  #                 outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")) %>% 
+  #               filter(outlier!="Standard"),
+  #             aes(y = pace_firsthalf_perkm,
+  #                 x = pace_secondhalf_perkm),
+  #             alpha = 1)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Set1"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "What are these outliers?")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,12.5)+
+  xlim(0,12.5)
+
+ggsave(paste0(plot_dir,"/Scatter_Outliers2.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 8.5)
+
+
+```
+
+
+
+```{r}
+
+
+ggplot()+
+  # geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df %>% 
+                filter(!age %in% c("70+")),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "grey",
+              alpha = 0.3)+
+  geom_jitter(data = df %>% 
+                filter(age %in% c("70+")),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "blue",
+              alpha = 1)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Set1"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "London Marathon 2023 - 70+ Highlighted")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,12.5)+
+  xlim(0,12.5)
+
+
+ggsave(paste0(plot_dir,"/Scatter_70Plus.png"),
+       plot = last_plot(),
+       width = 10,
+       height = 10)
+
+
+```
+
+
+
+```{r}
+
+
+ggplot()+
+  # geom_abline(color = "gray40", lty = 2) +
+  geom_histogram(data = df,
+              aes(x = minutes_finish/60),
+              bins = 50)+
+  geom_vline(data = df %>% group_by(age) %>% summarise(mean = mean(minutes_finish)/60),
+                 aes(xintercept = mean))+
+  geom_label(data = df %>% group_by(age) %>% summarise(mean = mean(minutes_finish)/60,
+                                                       N = n()),
+             aes(x = (mean+0.7),
+                 y = N*0.01,
+                 label = paste0(floor(mean),"h",round((mean-floor(mean))*60,0),"m")))+
+  facet_wrap(~age, scales = "free_y")+
+  # geom_jitter(data = df %>% 
+  #               filter(age=="70+"),
+  #             aes(y = pace_firsthalf_perkm,
+  #                 x = pace_secondhalf_perkm),
+  #             color = "blue",
+  #             alpha = 1)+
+  # scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Set1"))+
+  theme_bw()+
+  labs(y = "Number of runners",
+       x = "Hours to finish marathon",
+       title = "London Marathon 2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  )
+
+
+
+
+```
+
+
+
+```{r}
+
+ggplot()+
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(data = df %>%
+                group_by(gender) %>% 
+                arrange(finish) %>% 
+                mutate(rank = row_number()) %>% 
+                filter(!rank%in%c(1,2,3)),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "grey",
+              alpha = 0.3)+
+  geom_jitter(data = df %>%
+                group_by(gender) %>% 
+                arrange(finish) %>% 
+                mutate(rank = row_number())%>% 
+                filter(rank%in%c(1,2,3)),
+              aes(y = pace_firsthalf_perkm,
+                  x = pace_secondhalf_perkm),
+              color = "red",
+              alpha = 1)+
+  ggrepel::geom_label_repel(data = df %>%
+                     group_by(gender) %>% 
+                     arrange(finish) %>% 
+                     mutate(rank = row_number()) %>% 
+                     filter(rank %in% c(1,2,3)),
+                   aes(y = pace_firsthalf_perkm,
+                       x = pace_secondhalf_perkm,
+                       label = names),
+                   color = "#23203F",
+                   alpha = 0.7,
+                   size = 3)+
+  facet_wrap(~gender)+
+  scale_color_manual(values = RColorBrewer::brewer.pal(n=8,"Set1"))+
+  theme_bw()+
+  labs(y = "Pace per km (first half)",
+       x = "Pace per km (second half)",
+       title = "London Marathon 2023 - Wimbledon Windmilers")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14)
+  ) +
+  geom_abline(color = "gray40", lty = 2) +
+  ylim(0,5)+
+  xlim(0,5)
+
+ggsave(paste0(plot_dir,"/Scatter_Elite.png"),
+       plot = last_plot(),
+       width = 7,
+       height = 7)
+
+
+```
+
+
+
+```{r}
+
+
+
+boxplotdata <- df1423 %>% 
+  mutate(gender = factor(gender, levels = c("Womens","Mens"))) %>% 
+  filter(!is.na(age),
+         age!="")
+
+ggplot()+
+  geom_boxplot(data = boxplotdata,
+                 aes(x = age,
+                     y = minutes_finish/60, fill = gender),
+               outlier.alpha = 0)+
+  facet_wrap(~gender, scales = "free_y")+
+  theme_bw()+
+  labs(y = "Hours to finish marathon",
+       x = "Age band",
+       title = "London Marathon Times 2014-2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = rev(RColorBrewer::brewer.pal(n=3,"Pastel1")[c(1,2)]))+
+  scale_y_continuous(limits = c(0,10),breaks = seq(0,10,2))
+
+
+ggsave(paste0(plot_dir,"/Boxplot_Gender_Age2.png"),
+       plot = last_plot(),
+       width = 14,
+       height = 8)
+
+
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_boxplot(data = df %>% rowwise() %>% 
+                 mutate(percentage_difference = pace_firsthalf_perkm/pace_secondhalf_perkm) %>% 
+                 arrange(percentage_difference) %>% 
+                 mutate(
+                   outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")),
+               aes(x = age,
+                   y = percentage_difference, fill = gender))+
+  facet_wrap(~gender, scales = "free_y")+
+  theme_bw()+
+  labs(y = "",
+       x = "Age band",
+       title = "How much faster did runners complete the second half of the London Marathon?")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14, angle = 90),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))+
+  scale_y_continuous(labels = paste0(seq(0,3,0.5),"x"), breaks = seq(0,3,0.5),limits = c(0,3)) 
+
+
+ggsave(paste0(plot_dir,"/Boxplot_Gender_Age.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 8)
+
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_boxplot(data = df %>% rowwise() %>% 
+                 mutate(percentage_difference = pace_firsthalf_perkm/pace_secondhalf_perkm) %>% 
+                 arrange(percentage_difference) %>% 
+                 mutate(
+                   outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")),
+               aes(x = age,
+                   y = percentage_difference),
+               fill = RColorBrewer::brewer.pal(n = 3, "Pastel1")[3])+
+  # facet_wrap(~gender, scales = "free_y")+
+  theme_bw()+
+  labs(y = "",
+       x = "Age band",
+       title = "How much faster did runners complete the second half of the London Marathon?")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14, angle = 90),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  # scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))+
+  scale_y_continuous(labels = paste0(seq(0,3,0.5),"x"), breaks = seq(0,3,0.5),limits = c(0,3)) 
+
+
+ggsave(paste0(plot_dir,"/Boxplot_Age_Outlier.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 7)
+
+
+```
+
+
+
+```{r}
+
+
+ggplot()+
+  geom_boxplot(data = df %>% rowwise() %>% mutate(age2 = ifelse(age %in% c("18-39","40-44","45-49","50-54"),
+                                                                "Less than 55",
+                                                                "55 and Over")) %>% 
+                 mutate(percentage_difference = pace_firsthalf_perkm/pace_secondhalf_perkm) %>% 
+                 arrange(percentage_difference) %>% 
+                 mutate(
+                   outlier = ifelse(percentage_difference<0.5, "Outlier", "Standard")),
+               aes(x = age2,
+                   y = percentage_difference),
+               fill = RColorBrewer::brewer.pal(n = 3, "Pastel1")[3])+
+  # facet_wrap(~gender, scales = "free_y")+
+  coord_flip()+
+  theme_bw()+
+  labs(y = "",
+       x = "Age band",
+       title = "How much faster did runners complete the second half of the London Marathon?")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14, angle = 0, vjust = 0.5),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  # scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))+
+  scale_y_continuous(labels = paste0(seq(0,3,0.5),"x"), breaks = seq(0,3,0.5),limits = c(0,3)) 
+
+
+ggsave(paste0(plot_dir,"/Boxplot_Age_Outlier2.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 5)
+
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_histogram(data = df,
+                 aes(x = minutes_finish/60, fill = gender),
+                 bins = 150)+
+  geom_vline(data = df %>% group_by(gender, age) %>% summarise(mean = mean(minutes_finish)/60),
+             aes(xintercept = mean))+
+  geom_label(data = df %>% group_by(gender, age) %>% summarise(mean = mean(minutes_finish)/60,
+                                                       N = n()),
+             aes(x = (mean+0.7),
+                 y = N*0.01,
+                 label = paste0(floor(mean),"h",round((mean-floor(mean))*60,0),"m")))+
+  facet_wrap(~gender~age, scales = "free_y")+
+  theme_bw()+
+  labs(y = "Number of runners",
+       x = "Hours to finish marathon",
+       title = "London Marathon 2023")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))
+
+
+ggsave(paste0(plot_dir,"/Histogram_Gender_Age.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 12)
+
+```
+
+
+
+```{r}
+
+
+ggplot()+
+  geom_bar(data = df %>% 
+             filter(gender == "Womens") %>% 
+                   group_by(age,gender) %>% 
+                   summarise(mean = mean(minutes_finish/60, na.rm = T),
+                             median = median(minutes_finish/60, na.rm = T)),
+                 aes(x = age, fill = gender, y = median, group = gender),
+           color = "#23203F",
+           stat = "identity",
+           position = "dodge",
+           alpha = 0.6)+
+  geom_bar(data = df %>% 
+             filter(gender == "Mens") %>% 
+             group_by(age,gender) %>% 
+             summarise(mean = mean(minutes_finish/60, na.rm = T),
+                       median = median(minutes_finish/60, na.rm = T)),
+           aes(x = age, fill = gender, y = median, group = gender),
+           color = "#23203F",
+           stat = "identity",
+           position = "dodge",
+           alpha = 0.6)+
+  geom_text(data = df %>% 
+             # filter(gender == "Mens") %>% 
+             group_by(age,gender) %>% 
+             summarise(mean = mean(minutes_finish/60, na.rm = T),
+                       median = median(minutes_finish/60, na.rm = T)) %>% 
+              ungroup() %>% 
+              select(-mean) %>% 
+              group_by(age) %>% 
+              pivot_wider(names_from = "gender", values_from = "median") %>% 
+              mutate(diff = Womens-Mens) %>% 
+              pivot_longer(cols = 2:3, names_to = "gender", values_to = "median") %>% 
+              mutate(ypos = ifelse(gender == "Mens", median/2, median-diff/2)),
+           aes(x = age, fill = gender, y = median+0.1, label = paste0(floor(median),"h ",round((median-floor(median))*60,0),"m")),
+           color = "#23203F",
+           stat = "identity",
+           position = "dodge",
+           alpha = 1, size = 3)+
+  theme_bw()+
+  labs(y = "Median hours to finish marathon",
+       x = "Age band",
+       title = "London Marathon 2023 - Median times")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1")[c(4,6)])
+
+
+ggsave(paste0(plot_dir,"/Bar_Gender_Age.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 8)
+
+
+```
+
+
+
+```{r}
+
+
+
+ggplot()+
+  geom_bar(data = df %>% 
+             # filter(gender == "Mens") %>% 
+             group_by(age,gender) %>% 
+             summarise(mean = mean(minutes_finish/60, na.rm = T),
+                       median = median(minutes_finish/60, na.rm = T)),
+           aes(x = age, fill = gender, y = median, group = gender),
+           color = "#23203F",
+           stat = "identity",
+           position = "dodge",
+           alpha = 0.6)+
+  geom_text(data = df %>% 
+              # filter(gender == "Mens") %>% 
+              group_by(age,gender) %>% 
+              summarise(mean = mean(minutes_finish/60, na.rm = T),
+                        median = median(minutes_finish/60, na.rm = T)) %>% 
+              ungroup() #%>% 
+              # select(-mean) %>% 
+              # group_by(age) %>% 
+              # pivot_wider(names_from = "gender", values_from = "median") %>% 
+              # mutate(diff = Womens-Mens) %>% 
+              # pivot_longer(cols = 2:3, names_to = "gender", values_to = "median") %>% 
+              # mutate(ypos = ifelse(gender == "Mens", median/2, median-diff/2)
+                     ,
+            aes(x = age, fill = gender, y = median+0.1, fill = gender, label = paste0(floor(median),"h ",round((median-floor(median))*60,0),"m")),
+            color = "#23203F",
+            stat = "identity",
+            position = position_dodge2(width = 1),
+            alpha = 1, size = 4)+
+  theme_bw()+
+  labs(y = "Median hours to finish marathon",
+       x = "Age band",
+       title = "London Marathon 2023 - Median times")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1")[c(4,6)])
+
+
+ggsave(paste0(plot_dir,"/Bar_Gender_Age_2.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 8)
+
+
+
+```
+
+
+
+```{r}
+
+
+
+
+
+ggplot()+
+  geom_density(data = df %>% 
+                 mutate(lowerageband = as.numeric(substr(age,1,2)),
+                        x = case_when(age=="18-39"~(39-18)/2+18,
+                                            age=="70+"~75,
+                                            TRUE~lowerageband+2),
+                        y =  minutes_finish/60) %>% 
+                 filter(age %in% c(
+                   # "18-39",
+                   # "40-44",
+                   # "45-49",
+                   "50-54",
+                   # "55-59",
+                   "60-64",
+                   # "65-69",
+                   "70+"
+                 )),
+           aes(x = y, fill = age, group = age), adjust = 1,
+           alpha = 0.6)+
+  facet_wrap(~gender)+
+  theme_bw()+
+  labs(y = "PDF",
+       x = "Hours to finish marathon",
+       title = "London Marathon 2023 - Median times")+
+  theme(legend.title = element_blank(),
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title.y = element_text(size = 14),
+        axis.title.x = element_text(size = 14),
+        strip.text.x = element_text(size = 12)
+  )+
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n=8,"Pastel1"))
+
+
+ggsave(paste0(plot_dir,"/Density_Age_Gender.png"),
+       plot = last_plot(),
+       width = 12,
+       height = 8)
+
+```
